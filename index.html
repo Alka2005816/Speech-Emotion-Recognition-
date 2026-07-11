@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speech Emotion Recognition</title>
+<style>
+  :root{
+    --purple:#6c5ce7; --purple-dark:#5849c2;
+    --bg:#f4f5fb; --text:#1a1a2e; --muted:#8a8fa3; --border:#eceefb;
+    --green:#22c55e; --blue:#3b82f6; --red:#ef4444; --yellow:#f5a623; --pink:#ec4899;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  .wrap{max-width:760px;margin:0 auto;padding:32px 20px;}
+  h1{font-size:24px;font-weight:800;text-align:center;margin-bottom:6px;}
+  p.sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:28px;}
+
+  .card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:22px;margin-bottom:20px;box-shadow:0 2px 10px rgba(20,20,60,.05);}
+  .card-title{font-weight:700;font-size:14px;margin-bottom:14px;}
+
+  .drop{border:2px dashed #d7d9ef;border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:13px;cursor:pointer;margin-bottom:14px;}
+  .drop:hover{border-color:var(--purple);background:#faf9ff;}
+  .drop strong{display:block;color:var(--text);font-size:14px;}
+  .file-row{display:none;align-items:center;justify-content:space-between;background:#f6f7fd;border-radius:8px;padding:9px 13px;font-size:13px;margin-bottom:14px;}
+
+  .btn{width:100%;padding:12px;border-radius:10px;border:none;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:10px;}
+  .btn-primary{background:var(--purple);color:#fff;}
+  .btn-primary:disabled{opacity:.5;}
+  .btn-outline{background:#fdeef0;color:#e0507a;}
+
+  .result-body{display:flex;align-items:center;gap:16px;}
+  .result-emoji{width:60px;height:60px;border-radius:50%;background:#f2f2f9;display:flex;align-items:center;justify-content:center;font-size:30px;flex-shrink:0;}
+  .result-emotion{font-size:22px;font-weight:800;}
+  .result-conf{font-size:14px;font-weight:700;margin-top:2px;}
+  audio{width:100%;margin-top:14px;}
+
+  .donut-row{display:flex;align-items:center;gap:20px;}
+  .legend{flex:1;display:flex;flex-direction:column;gap:9px;}
+  .legend-item{display:flex;align-items:center;gap:8px;font-size:12px;}
+  .legend-item .sw{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .legend-item .nm{width:54px;font-weight:600;}
+  .legend-item .bar{flex:1;height:6px;background:#f0f1f9;border-radius:3px;overflow:hidden;}
+  .legend-item .fill{height:100%;border-radius:3px;}
+  .legend-item .val{width:48px;text-align:right;color:var(--muted);font-weight:600;}
+
+  .note{font-size:11px;color:var(--muted);text-align:center;margin-top:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎙️ Emotion Recognition from Speech</h1>
+  <p class="sub">Upload an audio file or record your voice — real audio features are analyzed, not random guesses.</p>
+
+  <div class="card">
+    <div class="card-title">Upload or Record Audio</div>
+    <div class="drop" id="dropZone">
+      <strong>☁️ Upload Audio File</strong>
+      Click or drop a .wav / .mp3 file
+      <input type="file" id="fileInput" accept="audio/*" style="display:none;">
+    </div>
+    <div class="file-row" id="fileRow">
+      <span id="fileName"></span><span style="color:var(--green)">✔️</span>
+    </div>
+    <button class="btn btn-primary" id="predictBtn" disabled>✨ Predict Emotion</button>
+    <button class="btn btn-outline" id="recordBtn">🎤 Record Your Voice</button>
+    <audio id="playerAudio" controls style="display:none;"></audio>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Prediction Result</div>
+    <div class="result-body">
+      <div class="result-emoji" id="resultEmoji">—</div>
+      <div>
+        <div class="result-emotion" id="resultEmotion" style="color:var(--muted)">No prediction yet</div>
+        <div class="result-conf" id="resultConf" style="color:var(--muted)">Upload audio to analyze</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Emotion Probabilities</div>
+    <div class="donut-row">
+      <svg width="110" height="110" viewBox="0 0 42 42" id="donutSvg">
+        <circle cx="21" cy="21" r="15.9" fill="transparent" stroke="#f0f1f9" stroke-width="5"></circle>
+      </svg>
+      <div class="legend" id="legend"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Raw Audio Features (yeh numbers seedhe aapki file se nikle hain)</div>
+    <div id="rawFeatures" style="font-size:12px;color:var(--muted);line-height:1.9;">Upload audio to see values</div>
+  </div>
+  <p class="note">Formula: har feature ko 0-1 scale mein normalize karke fixed weights se emotion score banta hai — koi trained neural network nahi, seedha calculation hai jo upar dikh raha hai.</p>
+</div>
+
+<script>
+ const emotions=[
+  {name:'Happy',emoji:'😄',color:'#22c55e'},
+  {name:'Sad',emoji:'😔',color:'#3b82f6'},
+  {name:'Angry',emoji:'😠',color:'#ef4444'},
+  {name:'Neutral',emoji:'😐',color:'#f5a623'},
+  {name:'Fear',emoji:'😨',color:'#ec4899'},
+];
+
+let currentBuffer=null;
+const dropZone=document.getElementById('dropZone'),fileInput=document.getElementById('fileInput'),
+  fileRow=document.getElementById('fileRow'),fileName=document.getElementById('fileName'),
+  predictBtn=document.getElementById('predictBtn'),player=document.getElementById('playerAudio');
+
+dropZone.onclick=()=>fileInput.click();
+dropZone.ondragover=e=>e.preventDefault();
+dropZone.ondrop=e=>{e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);};
+fileInput.onchange=()=>{ if(fileInput.files[0]) loadFile(fileInput.files[0]); };
+
+async function loadFile(file){
+  fileName.textContent=file.name; fileRow.style.display='flex';
+  player.src=URL.createObjectURL(file); player.style.display='block';
+  predictBtn.disabled=true; predictBtn.textContent='Loading...';
+  try{
+    const buf=await file.arrayBuffer();
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    currentBuffer=await ctx.decodeAudioData(buf); ctx.close();
+    predictBtn.disabled=false; predictBtn.textContent='✨ Predict Emotion';
+  }catch(e){
+    alert('Could not decode audio file.'); predictBtn.textContent='✨ Predict Emotion';
+  }
+}
+
+// ---- real feature extraction ----
+function extractFeatures(buf){
+  const d=buf.getChannelData(0), sr=buf.sampleRate, n=d.length;
+  let sumSq=0; for(let i=0;i<n;i++) sumSq+=d[i]*d[i];
+  const rms=Math.sqrt(sumSq/n);
+
+  let zc=0; for(let i=1;i<n;i++) if((d[i-1]>=0)!==(d[i]>=0)) zc++;
+  const zcr=zc/n;
+
+  const fs=Math.floor(sr*0.05)||1024, energies=[];
+  for(let i=0;i<n;i+=fs){ let s=0,c=0; for(let j=i;j<Math.min(i+fs,n);j++){s+=d[j]*d[j];c++;} energies.push(Math.sqrt(s/c)); }
+  const meanE=energies.reduce((a,b)=>a+b,0)/energies.length;
+  const varE=energies.reduce((a,b)=>a+(b-meanE)**2,0)/energies.length;
+
+  const start=Math.max(0,Math.floor(n/2)-1024), frame=d.slice(start,start+2048);
+  let bestLag=-1,bestCorr=0;
+  const minLag=Math.floor(sr/400), maxLag=Math.floor(sr/60);
+  for(let lag=minLag;lag<maxLag&&lag<frame.length;lag++){
+    let c=0; for(let i=0;i<frame.length-lag;i++) c+=frame[i]*frame[i+lag];
+    if(c>bestCorr){bestCorr=c;bestLag=lag;}
+  }
+  const pitchHz=bestLag>0?sr/bestLag:0;
+
+  const spec=d.slice(0,Math.min(2048,n)); const bins=64,step=Math.floor(spec.length/bins)||1;
+  let wsum=0,tsum=0;
+  for(let k=0;k<bins;k++){
+    let re=0,im=0; const f0=k*step;
+    for(let t=0;t<spec.length;t+=4){ const a=2*Math.PI*f0*t/spec.length; re+=spec[t]*Math.cos(a); im-=spec[t]*Math.sin(a); }
+    const mag=Math.sqrt(re*re+im*im); wsum+=k*mag; tsum+=mag;
+  }
+  const centroidHz=tsum>0?(wsum/tsum)*(sr/2)/bins:0;
+
+  return {rms,zcr,varE,pitchHz,centroidHz};
+}
+
+function clamp01(v){return Math.max(0,Math.min(1,isFinite(v)?v:0));}
+
+function scoreEmotions(f){
+  const loud=clamp01(f.rms*6), rough=clamp01(f.zcr*25), dyn=clamp01(f.varE*40),
+        pitch=clamp01((f.pitchHz-80)/300), bright=clamp01(f.centroidHz/3000);
+  const s={
+    Happy:0.35*pitch+0.30*bright+0.25*dyn+0.10*loud,
+    Sad:0.40*(1-loud)+0.30*(1-dyn)+0.20*(1-pitch)+0.10*(1-bright),
+    Angry:0.35*loud+0.35*rough+0.20*dyn+0.10*bright,
+    Neutral:0.40*(1-dyn)+0.35*(1-rough)+0.25*(1-Math.abs(pitch-0.5)*2),
+    Fear:0.35*rough+0.30*pitch+0.20*dyn+0.15*(1-loud),
+  };
+  const keys=Object.keys(s), exp=keys.map(k=>Math.exp(s[k]*3)), sum=exp.reduce((a,b)=>a+b,0);
+  const probs={}; keys.forEach((k,i)=>probs[k]=exp[i]/sum*100);
+  return probs;
+}
+
+function renderDonut(probs){
+  const svg=document.getElementById('donutSvg');
+  svg.innerHTML='<circle cx="21" cy="21" r="15.9" fill="transparent" stroke="#f0f1f9" stroke-width="5"></circle>';
+  const circ=2*Math.PI*15.9; let offset=0;
+  probs.forEach((p,i)=>{
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',21);c.setAttribute('cy',21);c.setAttribute('r',15.9);
+    c.setAttribute('fill','transparent');c.setAttribute('stroke',emotions[i].color);c.setAttribute('stroke-width',5);
+    const dash=(p/100)*circ;
+    c.setAttribute('stroke-dasharray','${dash} ${circ-dash}');
+    c.setAttribute('stroke-dashoffset',-offset);
+    c.setAttribute('transform','rotate(-90 21 21)');
+    svg.appendChild(c); offset+=dash;
+  });
+}
+ function renderLegend(probs){
+  const el=document.getElementById('legend'); el.innerHTML='';
+  emotions.forEach((e,i)=>{
+    el.innerHTML+=`<div class="legend-item"><span class="sw" style="background:${e.color}"></span>
+      <span class="nm">${e.name}</span>
+      <span class="bar"><span class="fill" style="width:${probs[i]}%;background:${e.color}"></span></span>
+      <span class="val">${probs[i].toFixed(2)}%</span></div>`;
+  });
+}
+
+predictBtn.onclick=()=>{
+  if(!currentBuffer){ alert('Pehle audio upload/record karo.'); return; }
+  const f=extractFeatures(currentBuffer);
+  const probMap=scoreEmotions(f);
+  const probs=emotions.map(e=>probMap[e.name]);
+  let top=0; for(let i=1;i<probs.length;i++) if(probs[i]>probs[top]) top=i;
+  document.getElementById('resultEmoji').textContent=emotions[top].emoji;
+  const re=document.getElementById('resultEmotion'); re.textContent=emotions[top].name; re.style.color=emotions[top].color;
+  const rc=document.getElementById('resultConf'); rc.textContent='Confidence: '+probs[top].toFixed(2)+'%'; rc.style.color=emotions[top].color;
+  renderDonut(probs); renderLegend(probs);
+
+  document.getElementById('rawFeatures').innerHTML=`
+    Loudness (RMS energy): <b>${f.rms.toFixed(4)}</b><br>
+    Pitch (estimated Hz): <b>${f.pitchHz.toFixed(1)} Hz</b><br>
+    Roughness (zero-crossing rate): <b>${f.zcr.toFixed(4)}</b><br>
+    Brightness (spectral centroid): <b>${f.centroidHz.toFixed(0)} Hz</b><br>
+    Dynamics (energy variance): <b>${f.varE.toFixed(6)}</b>`;
+};
+
+document.getElementById('recordBtn').onclick=async function(){
+  if(!navigator.mediaDevices){ alert('Mic recording supported nahi hai.'); return; }
+  if(this.dataset.rec==='1'){
+    this._recorder.stop(); this.dataset.rec='0'; this.textContent='🎤 Record Your Voice'; return;
+  }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const chunks=[]; const rec=new MediaRecorder(stream);
+    rec.ondataavailable=e=>chunks.push(e.data);
+    rec.onstop=async()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      const blob=new Blob(chunks,{type:'audio/webm'});
+      await loadFile(new File([blob],'recording.webm',{type:'audio/webm'}));
+    };
+    rec.start(); this._recorder=rec; this.dataset.rec='1'; this.textContent='⏹️ Stop Recording';
+  }catch(e){ alert('Microphone access denied.'); }
+};
+
+renderDonut([20,20,20,20,20]);
+renderLegend([20,20,20,20,20]);
+</script>
+</body>
+</html>
